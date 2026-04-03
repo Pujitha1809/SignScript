@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SignScript — ASL to Text</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+<style>
+/* ── Reset & Variables ─────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #0a0a0f;
+  --surface:   #12121a;
+  --border:    #1e1e2e;
+  --accent:    #7c6af7;
+  --accent2:   #f76a8a;
+  --green:     #4fffb0;
+  --text:      #e8e8f0;
+  --muted:     #5a5a7a;
+  --glow:      rgba(124,106,247,0.35);
+  --font-head: 'Syne', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --r:         12px;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  overflow-x: hidden;
+}
+
+/* ── Noise grain overlay ────────────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none; z-index: 9999;
+  opacity: 0.6;
+}
+
+/* ── Layout ─────────────────────────────────────────────────────── */
+.app {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+header {
+  padding: 1.5rem 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(10px);
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(10,10,15,0.85);
+}
+
+.logo {
+  font-family: var(--font-head);
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+}
+.logo span { color: var(--accent); }
+
+.status-pill {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: 0.72rem; letter-spacing: 0.08em;
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  text-transform: uppercase;
+}
+.status-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--muted);
+  transition: background 0.3s;
+}
+.status-dot.active { background: var(--green); box-shadow: 0 0 8px var(--green); animation: pulse 1.5s infinite; }
+.status-dot.error  { background: var(--accent2); }
+
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+/* ── Main grid ──────────────────────────────────────────────────── */
+main {
+  display: grid;
+  grid-template-columns: 1fr 360px;
+  gap: 1.5rem;
+  padding: 1.5rem 2.5rem;
+  align-items: start;
+}
+
+/* ── Camera panel ───────────────────────────────────────────────── */
+.cam-panel {
+  display: flex; flex-direction: column; gap: 1rem;
+}
+
+.cam-wrap {
+  position: relative;
+  border-radius: var(--r);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: #000;
+  aspect-ratio: 4/3;
+}
+
+#video {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+  transform: scaleX(-1);   /* mirror effect */
+}
+
+#overlay {
+  position: absolute; inset: 0;
+  pointer-events: none;
+}
+
+.cam-controls {
+  display: flex; gap: 0.75rem;
+}
+
+/* ── Glow button ────────────────────────────────────────────────── */
+.btn {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  letter-spacing: 0.06em;
+  padding: 0.65rem 1.4rem;
+  border-radius: var(--r);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.2s;
+  background: var(--surface);
+  color: var(--text);
+  text-transform: uppercase;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 20px var(--glow);
+}
+.btn.primary:hover { box-shadow: 0 0 35px var(--glow); transform: translateY(-1px); }
+.btn.danger { border-color: var(--accent2); color: var(--accent2); }
+.btn.danger:hover { background: rgba(247,106,138,0.1); }
+.btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none !important; }
+
+/* ── Right sidebar ──────────────────────────────────────────────── */
+.sidebar {
+  display: flex; flex-direction: column; gap: 1rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 1.25rem;
+}
+.card-title {
+  font-family: var(--font-head);
+  font-size: 0.7rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 1rem;
+}
+
+/* ── Big letter display ─────────────────────────────────────────── */
+.letter-display {
+  text-align: center;
+  padding: 1.5rem 1rem;
+}
+.big-letter {
+  font-family: var(--font-head);
+  font-size: 7rem;
+  font-weight: 800;
+  line-height: 1;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  transition: all 0.15s cubic-bezier(0.34,1.56,0.64,1);
+  display: block;
+  min-height: 8rem;
+  position: relative;
+}
+.big-letter.pop {
+  animation: letterPop 0.25s cubic-bezier(0.34,1.56,0.64,1);
+}
+@keyframes letterPop {
+  0%   { transform: scale(0.7); opacity: 0.5; }
+  100% { transform: scale(1);   opacity: 1;   }
+}
+
+.conf-bar-wrap {
+  margin-top: 0.75rem;
+}
+.conf-label {
+  display: flex; justify-content: space-between;
+  font-size: 0.72rem; color: var(--muted);
+  margin-bottom: 0.4rem;
+}
+.conf-bar {
+  height: 4px;
+  border-radius: 99px;
+  background: var(--border);
+  overflow: hidden;
+}
+.conf-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--accent), var(--accent2));
+  transition: width 0.2s ease;
+  width: 0%;
+}
+
+/* ── Top 3 ──────────────────────────────────────────────────────── */
+.top3 {
+  display: flex; flex-direction: column; gap: 0.5rem;
+}
+.top3-row {
+  display: flex; align-items: center; gap: 0.75rem;
+  font-size: 0.78rem;
+}
+.top3-ltr {
+  font-family: var(--font-head);
+  font-weight: 700;
+  font-size: 1.1rem;
+  width: 1.6rem;
+  color: var(--text);
+}
+.top3-bar-bg {
+  flex: 1; height: 6px; border-radius: 99px;
+  background: var(--border); overflow: hidden;
+}
+.top3-bar-fill {
+  height: 100%; border-radius: 99px;
+  background: var(--accent);
+  transition: width 0.25s ease;
+  opacity: 0.6;
+}
+.top3-row:first-child .top3-bar-fill { opacity: 1; }
+.top3-pct {
+  width: 3rem; text-align: right;
+  color: var(--muted); font-size: 0.7rem;
+}
+
+/* ── Word / sentence builder ────────────────────────────────────── */
+.word-display {
+  font-family: var(--font-head);
+  font-size: 1.8rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  word-break: break-all;
+  min-height: 3rem;
+  line-height: 1.2;
+  color: var(--text);
+}
+.cursor-blink {
+  display: inline-block;
+  width: 3px; height: 1.6rem;
+  background: var(--accent);
+  margin-left: 2px;
+  vertical-align: middle;
+  animation: blink 1s step-end infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+.sentence-area {
+  font-size: 0.9rem;
+  color: var(--muted);
+  min-height: 2.5rem;
+  line-height: 1.5;
+  margin-top: 0.5rem;
+  word-break: break-word;
+}
+
+.builder-controls {
+  display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem;
+}
+.builder-controls .btn { padding: 0.45rem 0.9rem; font-size: 0.72rem; }
+
+/* ── Stabiliser setting ─────────────────────────────────────────── */
+.setting-row {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 0.78rem; color: var(--muted);
+  padding: 0.4rem 0;
+}
+.setting-row + .setting-row { border-top: 1px solid var(--border); }
+input[type=range] {
+  accent-color: var(--accent);
+  width: 100px;
+}
+input[type=number] {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 0.2rem 0.5rem;
+  width: 60px;
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+/* ── Footer ─────────────────────────────────────────────────────── */
+footer {
+  padding: 0.9rem 2.5rem;
+  border-top: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: 0.7rem; color: var(--muted);
+}
+
+/* ── Hand not detected overlay ──────────────────────────────────── */
+.no-hand-msg {
+  position: absolute;
+  bottom: 1rem; left: 50%; transform: translateX(-50%);
+  background: rgba(10,10,15,0.8);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.35rem 1rem;
+  font-size: 0.72rem; color: var(--muted);
+  backdrop-filter: blur(8px);
+  white-space: nowrap;
+  transition: opacity 0.3s;
+}
+
+/* ── Hand bbox overlay ──────────────────────────────────────────── */
+.bbox-rect {
+  position: absolute;
+  border: 2px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 0 12px var(--glow);
+  pointer-events: none;
+  transition: all 0.1s ease;
+}
+
+/* ── Toast ──────────────────────────────────────────────────────── */
+.toast {
+  position: fixed;
+  bottom: 2rem; right: 2rem;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--r);
+  padding: 0.75rem 1.25rem;
+  font-size: 0.82rem;
+  color: var(--text);
+  box-shadow: 0 0 30px var(--glow);
+  z-index: 10000;
+  animation: toastIn 0.3s ease, toastOut 0.3s ease 2.2s forwards;
+}
+@keyframes toastIn  { from { opacity:0; transform: translateY(1rem); } }
+@keyframes toastOut { to   { opacity:0; transform: translateY(1rem); } }
+
+/* ── Responsive ─────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  main { grid-template-columns: 1fr; }
+  .sidebar { flex-direction: row; flex-wrap: wrap; }
+  .sidebar .card { flex: 1 1 260px; }
+}
+@media (max-width: 600px) {
+  header { padding: 1rem; }
+  main { padding: 1rem; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+
+<!-- ── Header ──────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">Sign<span>Script</span></div>
+  <div class="status-pill">
+    <div class="status-dot" id="statusDot"></div>
+    <span id="statusText">Offline</span>
+  </div>
+</header>
+
+<!-- ── Main ────────────────────────────────────────────────────── -->
+<main>
+
+  <!-- Camera column -->
+  <div class="cam-panel">
+    <div class="cam-wrap">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="overlay"></canvas>
+      <div class="no-hand-msg" id="noHandMsg" style="opacity:0">✋ No hand detected</div>
+    </div>
+    <div class="cam-controls">
+      <button class="btn primary" id="btnStart">▶ Start Camera</button>
+      <button class="btn"         id="btnStop"  disabled>■ Stop</button>
+      <button class="btn"         id="btnSnap"  disabled>📸 Add Letter</button>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+
+    <!-- Big letter -->
+    <div class="card letter-display">
+      <div class="card-title">Detected Letter</div>
+      <span class="big-letter" id="bigLetter">—</span>
+      <div class="conf-bar-wrap">
+        <div class="conf-label">
+          <span>Confidence</span>
+          <span id="confPct">0%</span>
+        </div>
+        <div class="conf-bar"><div class="conf-fill" id="confFill"></div></div>
+      </div>
+    </div>
+
+    <!-- Top 3 -->
+    <div class="card">
+      <div class="card-title">Top Predictions</div>
+      <div class="top3" id="top3">
+        <div class="top3-row"><span class="top3-ltr">—</span><div class="top3-bar-bg"><div class="top3-bar-fill" style="width:0"></div></div><span class="top3-pct">0%</span></div>
+        <div class="top3-row"><span class="top3-ltr">—</span><div class="top3-bar-bg"><div class="top3-bar-fill" style="width:0"></div></div><span class="top3-pct">0%</span></div>
+        <div class="top3-row"><span class="top3-ltr">—</span><div class="top3-bar-bg"><div class="top3-bar-fill" style="width:0"></div></div><span class="top3-pct">0%</span></div>
+      </div>
+    </div>
+
+    <!-- Word builder -->
+    <div class="card">
+      <div class="card-title">Word Builder</div>
+      <div class="word-display" id="wordDisplay"><span class="cursor-blink"></span></div>
+      <div class="sentence-area" id="sentenceArea"></div>
+      <div class="builder-controls">
+        <button class="btn"        id="btnAddLetter">+ Letter</button>
+        <button class="btn"        id="btnSpace">Space</button>
+        <button class="btn danger" id="btnBackspace">⌫ Del</button>
+        <button class="btn danger" id="btnClear">Clear</button>
+        <button class="btn primary" id="btnSpeak">🔊 Speak</button>
+      </div>
+    </div>
+
+    <!-- Settings -->
+    <div class="card">
+      <div class="card-title">Settings</div>
+      <div class="setting-row">
+        <span>Hold frames to confirm</span>
+        <input type="number" id="holdFrames" value="8" min="1" max="30" />
+      </div>
+      <div class="setting-row">
+        <span>API interval (ms)</span>
+        <input type="number" id="intervalMs" value="200" min="50" max="1000" step="50" />
+      </div>
+      <div class="setting-row">
+        <span>Min confidence</span>
+        <input type="range" id="confThresh" min="0.4" max="0.99" step="0.01" value="0.6" />
+        <span id="confThreshVal">60%</span>
+      </div>
+      <div class="setting-row">
+        <span>Auto-add letter</span>
+        <input type="checkbox" id="autoAdd" checked />
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- ── Footer ──────────────────────────────────────────────────── -->
+<footer>
+  <span>SignScript v1.0 — ASL Alphabet Translator</span>
+  <span id="fpsDisplay">— fps</span>
+</footer>
+
+</div><!-- .app -->
+
+<script>
+/* ════════════════════════════════════════════════════════════════
+   SignScript — Phase 3 + 4 Client Logic
+   Sends webcam frames → Flask /predict → renders results
+   ════════════════════════════════════════════════════════════════ */
+
+const API_BASE = window.location.origin;   // same-origin; change if separate host
+
+// DOM refs
+const video       = document.getElementById('video');
+const overlay     = document.getElementById('overlay');
+const statusDot   = document.getElementById('statusDot');
+const statusText  = document.getElementById('statusText');
+const bigLetter   = document.getElementById('bigLetter');
+const confFill    = document.getElementById('confFill');
+const confPct     = document.getElementById('confPct');
+const top3El      = document.getElementById('top3');
+const wordDisplay = document.getElementById('wordDisplay');
+const sentenceEl  = document.getElementById('sentenceArea');
+const noHandMsg   = document.getElementById('noHandMsg');
+const fpsDisplay  = document.getElementById('fpsDisplay');
+
+const btnStart    = document.getElementById('btnStart');
+const btnStop     = document.getElementById('btnStop');
+const btnSnap     = document.getElementById('btnSnap');
+const btnAddLetter= document.getElementById('btnAddLetter');
+const btnSpace    = document.getElementById('btnSpace');
+const btnBackspace= document.getElementById('btnBackspace');
+const btnClear    = document.getElementById('btnClear');
+const btnSpeak    = document.getElementById('btnSpeak');
+
+const holdFramesEl  = document.getElementById('holdFrames');
+const intervalEl    = document.getElementById('intervalMs');
+const confThreshEl  = document.getElementById('confThresh');
+const confThreshVal = document.getElementById('confThreshVal');
+const autoAddEl     = document.getElementById('autoAdd');
+
+// State
+let stream       = null;
+let loopTimer    = null;
+let sentence     = '';
+let currentWord  = '';
+let currentLetter = null;
+let holdCount    = 0;
+let lastFpsTime  = performance.now();
+let frameCount   = 0;
+let busy         = false;
+
+// Canvas for frame capture
+const captureCanvas = document.createElement('canvas');
+const ctx2d = captureCanvas.getContext('2d');
+
+/* ── Utilities ─────────────────────────────────────────────────── */
+function setStatus(state) {
+  statusDot.className = 'status-dot ' + (state || '');
+  statusText.textContent = state === 'active' ? 'Live' : state === 'error' ? 'Error' : 'Offline';
+}
+
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.className = 'toast';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 2600);
+}
+
+function grabFrame() {
+  captureCanvas.width  = video.videoWidth  || 640;
+  captureCanvas.height = video.videoHeight || 480;
+  ctx2d.save();
+  ctx2d.translate(captureCanvas.width, 0);
+  ctx2d.scale(-1, 1);
+  ctx2d.drawImage(video, 0, 0);
+  ctx2d.restore();
+  return captureCanvas.toDataURL('image/jpeg', 0.7);
+}
+
+/* ── bbox overlay ──────────────────────────────────────────────── */
+function drawBbox(bbox) {
+  // Remove old rects
+  overlay.querySelectorAll('.bbox-rect').forEach(el => el.remove());
+  if (!bbox) return;
+
+  const [x1, y1, x2, y2] = bbox;
+  const vw = video.offsetWidth  || video.clientWidth;
+  const vh = video.offsetHeight || video.clientHeight;
+  const nw = video.videoWidth  || 640;
+  const nh = video.videoHeight || 480;
+
+  // Flip x for mirrored video
+  const flippedX1 = nw - x2;
+  const flippedX2 = nw - x1;
+
+  const rect = document.createElement('div');
+  rect.className = 'bbox-rect';
+  rect.style.left   = (flippedX1 / nw * vw) + 'px';
+  rect.style.top    = (y1        / nh * vh) + 'px';
+  rect.style.width  = ((flippedX2 - flippedX1) / nw * vw) + 'px';
+  rect.style.height = ((y2 - y1) / nh * vh) + 'px';
+  overlay.appendChild(rect);
+}
+
+/* ── Render prediction ─────────────────────────────────────────── */
+function renderResult(data) {
+  const minConf = parseFloat(confThreshEl.value);
+  const handOk  = data.hand_detected;
+
+  noHandMsg.style.opacity = handOk ? '0' : '0.95';
+  drawBbox(handOk ? data.bbox : null);
+
+  if (!handOk || !data.accepted || data.confidence < minConf) {
+    // fade but don't clear during brief gaps
+    holdCount = 0;
+    return;
+  }
+
+  const letter = data.letter;
+  const conf   = data.confidence;
+
+  // Update confidence UI
+  confFill.style.width = (conf * 100).toFixed(1) + '%';
+  confPct.textContent  = (conf * 100).toFixed(1) + '%';
+
+  // Update top-3
+  const rows = top3El.querySelectorAll('.top3-row');
+  (data.top3 || []).forEach((item, i) => {
+    if (!rows[i]) return;
+    rows[i].querySelector('.top3-ltr').textContent = item.label;
+    rows[i].querySelector('.top3-bar-fill').style.width = (item.confidence * 100).toFixed(1) + '%';
+    rows[i].querySelector('.top3-pct').textContent = (item.confidence * 100).toFixed(0) + '%';
+  });
+
+  // Big letter pop animation
+  if (letter !== currentLetter) {
+    bigLetter.classList.remove('pop');
+    void bigLetter.offsetWidth;  // reflow
+    bigLetter.textContent = letter;
+    bigLetter.classList.add('pop');
+    currentLetter = letter;
+    holdCount = 0;
+  } else {
+    holdCount++;
+  }
+
+  // Auto-add after N stable frames
+  const holdNeeded = parseInt(holdFramesEl.value) || 8;
+  if (autoAddEl.checked && holdCount === holdNeeded) {
+    appendToWord(letter);
+    holdCount = 0;
+  }
+}
+
+/* ── Word builder ──────────────────────────────────────────────── */
+function renderWord() {
+  wordDisplay.innerHTML = (currentWord || '') + '<span class="cursor-blink"></span>';
+}
+
+function appendToWord(letter) {
+  if (!letter || letter === 'nothing') return;
+  if (letter === 'space') {
+    if (currentWord) {
+      sentence += (sentence ? ' ' : '') + currentWord;
+      sentenceEl.textContent = sentence;
+      currentWord = '';
+    }
+  } else if (letter === 'del') {
+    currentWord = currentWord.slice(0, -1);
+  } else {
+    currentWord += letter.toUpperCase();
+  }
+  renderWord();
+  showToast(letter === 'space' ? '[ space ]' : letter === 'del' ? '⌫' : `+ ${letter.toUpperCase()}`);
+}
+
+/* ── API loop ──────────────────────────────────────────────────── */
+async function predictLoop() {
+  if (busy || !stream) return;
+  busy = true;
+
+  try {
+    const frame = grabFrame();
+    const res = await fetch(`${API_BASE}/predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ frame }),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    renderResult(data);
+
+    // FPS counter
+    frameCount++;
+    const now = performance.now();
+    if (now - lastFpsTime >= 1000) {
+      fpsDisplay.textContent = frameCount + ' fps';
+      frameCount = 0;
+      lastFpsTime = now;
+    }
+
+  } catch (err) {
+    console.warn('Predict error:', err);
+    setStatus('error');
+  } finally {
+    busy = false;
+  }
+}
+
+/* ── Camera control ────────────────────────────────────────────── */
+btnStart.addEventListener('click', async () => {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 }, audio: false });
+    video.srcObject = stream;
+    await video.play();
+
+    setStatus('active');
+    btnStart.disabled = true;
+    btnStop.disabled  = false;
+    btnSnap.disabled  = false;
+
+    const ms = parseInt(intervalEl.value) || 200;
+    loopTimer = setInterval(predictLoop, ms);
+
+    showToast('📷 Camera started');
+  } catch (e) {
+    setStatus('error');
+    showToast('❌ Camera access denied: ' + e.message);
+  }
+});
+
+btnStop.addEventListener('click', () => {
+  clearInterval(loopTimer);
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  video.srcObject = null;
+  setStatus('');
+  btnStart.disabled = false;
+  btnStop.disabled  = true;
+  btnSnap.disabled  = true;
+  drawBbox(null);
+  noHandMsg.style.opacity = '0';
+  showToast('⏹ Camera stopped');
+});
+
+// Manual snap
+btnSnap.addEventListener('click', () => {
+  if (currentLetter) appendToWord(currentLetter);
+});
+
+/* ── Builder buttons ───────────────────────────────────────────── */
+btnAddLetter.addEventListener('click', () => { if (currentLetter) appendToWord(currentLetter); });
+btnSpace.addEventListener('click',    () => appendToWord('space'));
+btnBackspace.addEventListener('click',() => appendToWord('del'));
+btnClear.addEventListener('click',    () => {
+  currentWord = ''; sentence = ''; sentenceEl.textContent = ''; renderWord();
+});
+btnSpeak.addEventListener('click', () => {
+  const text = (sentence + (sentence && currentWord ? ' ' : '') + currentWord).trim();
+  if (!text) { showToast('Nothing to speak!'); return; }
+  const utt = new SpeechSynthesisUtterance(text);
+  utt.rate = 0.95;
+  window.speechSynthesis.speak(utt);
+  showToast('🔊 Speaking…');
+});
+
+/* ── Settings live update ──────────────────────────────────────── */
+confThreshEl.addEventListener('input', () => {
+  confThreshVal.textContent = Math.round(confThreshEl.value * 100) + '%';
+});
+
+intervalEl.addEventListener('change', () => {
+  if (!stream) return;
+  clearInterval(loopTimer);
+  const ms = parseInt(intervalEl.value) || 200;
+  loopTimer = setInterval(predictLoop, ms);
+});
+
+/* ── Init ──────────────────────────────────────────────────────── */
+renderWord();
+</script>
+</body>
+</html>
