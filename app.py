@@ -18,7 +18,7 @@ CORS(app)
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 # POINTING BACK TO THE ORIGINAL MODEL
-MODEL_PATH  = r"model\sign_model_savedmodel.keras"
+MODEL_PATH = r"model\sign_model_fixed.keras"
 LABELS_PATH = os.environ.get("LABELS_PATH", r"model\class_labels.json")
 IMG_SIZE    = 64
 CONF_THRESH = 0.60
@@ -27,7 +27,7 @@ CONF_THRESH = 0.60
 print("USING MODEL:", MODEL_PATH)
 logger.info("Loading model from %s …", MODEL_PATH)
 
-import keras
+from tensorflow import keras
 
 # Keras 3 wrapper to intercept the legacy quantization key
 class SafeDense(keras.layers.Dense):
