@@ -1,7 +1,7 @@
-flask
-flask-cors
-numpy
-opencv-python-headless
-mediapipe
-tensorflow-cpu
-gunicorn
+flask==3.0.3
+flask-cors==4.0.1
+numpy==1.26.4
+opencv-python-headless==4.9.0.80
+mediapipe==0.10.14
+tensorflow-cpu==2.15.1
+gunicorn==22.0.0
