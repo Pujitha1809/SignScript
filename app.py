@@ -51,7 +51,8 @@ except Exception as e:
     idx_to_label = {}
 
 # ─── MediaPipe Hands ──────────────────────────────────────────────────────────
-from mediapipe.python.solutions import hands as mp_hands
+import mediapipe as mp
+mp_hands = mp.solutions.hands
 
 hands_model = mp_hands.Hands(
     static_image_mode=True,
